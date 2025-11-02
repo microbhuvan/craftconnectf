@@ -12,7 +12,8 @@ const BusinessSessionSchema = new mongoose.Schema({
     currentStatus: String,
     goals: [String],
     hasOnlinePresence: { type: mongoose.Schema.Types.Mixed },
-    targetMarket: String,
+    // changed from String -> [String]
+    targetMarket: { type: [String], default: [] },
     keyStrengths: [String]
   },
   businessSummaryApproved: { type: Boolean, default: false },
@@ -99,6 +100,16 @@ BusinessSessionSchema.pre('save', function(next) {
     if (['true','yes','y','1'].includes(v)) this.businessSummary.hasOnlinePresence = true;
     else if (['false','no','n','0'].includes(v)) this.businessSummary.hasOnlinePresence = false;
     else this.businessSummary.hasOnlinePresence = false;
+  }
+  // Ensure targetMarket always array
+  if (bs && !Array.isArray(bs.targetMarket)) {
+    if (typeof bs.targetMarket === 'string' && bs.targetMarket.trim()) {
+      this.businessSummary.targetMarket = bs.targetMarket.split(',').map(s => s.trim()).filter(Boolean);
+    } else if (bs.targetMarket == null) {
+      this.businessSummary.targetMarket = [];
+    } else {
+      this.businessSummary.targetMarket = [String(bs.targetMarket)];
+    }
   }
   const weights = { 'business_overview_complete':25,'ready_for_product_analysis':35,'product_analysis_complete':70,'ready_for_recommendations':85,'complete':100,'product_needs_revision':60 };
   this.completionRate = weights[this.step] || 0;
