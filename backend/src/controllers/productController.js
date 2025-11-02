@@ -1,6 +1,5 @@
 const { SpeechClient } = require('@google-cloud/speech');
-const aiplatform = require('@google-cloud/aiplatform');
-const { helpers } = aiplatform;
+const { VertexAI } = require('@google-cloud/vertexai');
 const { ImageAnnotatorClient } = require('@google-cloud/vision');
 const mongoose = require('mongoose');
 const BusinessSession = require('../models/BusinessSession');
@@ -9,17 +8,34 @@ const Product = require('../models/Product');
 // Initialize Google Cloud clients
 const speechClient = new SpeechClient();
 const visionClient = new ImageAnnotatorClient();
+let vertexAI = null;
+let generativeModel = null;
 
-// Build the generative model client via helpers (compatible across versions)
-const clientOptions = {
-  apiEndpoint: `${process.env.GOOGLE_LOCATION || 'us-central1'}-aiplatform.googleapis.com`,
-};
-const publisherModel = {
-  name: `projects/${process.env.GOOGLE_PROJECT_ID}/locations/${process.env.GOOGLE_LOCATION || 'us-central1'}/publishers/google/models/${process.env.VERTEX_MODEL || 'gemini-2.5-flash'}`,
-};
-const generativeClient = new helpers.GenerativeModel(publisherModel, clientOptions);
+try {
+  vertexAI = new VertexAI({
+    project: process.env.GOOGLE_PROJECT_ID,
+    location: process.env.GOOGLE_LOCATION || 'us-central1',
+  });
+  generativeModel = vertexAI.preview.getGenerativeModel({
+    model: process.env.VERTEX_MODEL || 'gemini-2.5-flash',
+  });
+  console.log('✅ Product Controller Vertex AI initialized');
+} catch (e) {
+  console.error('❌ Failed to initialize Vertex AI in product controller:', e.message);
+}
 
-// Step 3: Comprehensive Product Analysis (Voice + Images)
+// Utility: extract JSON from text
+function extractJson(text) {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
+
+// Step 3: Comprehensive Product Analysis
 exports.analyzeComprehensive = async (req, res) => {
   try {
     console.log('🎨 Starting comprehensive product analysis...');
@@ -39,10 +55,10 @@ exports.analyzeComprehensive = async (req, res) => {
 
     // Process audio if provided
     if (req.files && req.files.audio && req.files.audio[0]) {
-      console.log('🎤 Processing product audio description...');
+      console.log('🎤 Processing product audio...');
       
       const audioBytes = req.files.audio[0].buffer.toString('base64');
-      const speechRequest = {
+      const [response] = await speechClient.recognize({
         audio: { content: audioBytes },
         config: {
           encoding: 'WEBM_OPUS',
@@ -51,9 +67,8 @@ exports.analyzeComprehensive = async (req, res) => {
           enableAutomaticPunctuation: true,
           model: 'latest_long',
         },
-      };
-
-      const [response] = await speechClient.recognize(speechRequest);
+      });
+      
       productTranscript = response.results
         ?.map(result => result.alternatives[0]?.transcript)
         .join(' ') || '';
@@ -63,25 +78,21 @@ exports.analyzeComprehensive = async (req, res) => {
 
     // Process images if provided
     if (req.files && req.files.images) {
-      console.log(`📸 Processing ${req.files.images.length} product images...`);
+      console.log(`📸 Processing ${req.files.images.length} images...`);
       
       for (let i = 0; i < req.files.images.length; i++) {
         const imageFile = req.files.images[i];
         
         try {
-          // Analyze image with Vision API
-          const visionRequest = {
+          const [visionResponse] = await visionClient.annotateImage({
             image: { content: imageFile.buffer.toString('base64') },
             features: [
               { type: 'LABEL_DETECTION', maxResults: 10 },
               { type: 'OBJECT_LOCALIZATION', maxResults: 10 },
               { type: 'TEXT_DETECTION' },
-              { type: 'IMAGE_PROPERTIES' },
-              { type: 'SAFE_SEARCH_DETECTION' }
+              { type: 'IMAGE_PROPERTIES' }
             ],
-          };
-
-          const [visionResponse] = await visionClient.annotateImage(visionRequest);
+          });
           
           const analysis = {
             imageIndex: i + 1,
@@ -93,114 +104,46 @@ exports.analyzeComprehensive = async (req, res) => {
               name: obj.name,
               score: obj.score
             })) || [],
-            text: visionResponse.textAnnotations?.[0]?.description || '',
-            colors: visionResponse.imagePropertiesAnnotation?.dominantColors?.colors?.slice(0, 5).map(color => ({
-              red: color.color?.red || 0,
-              green: color.color?.green || 0,
-              blue: color.color?.blue || 0,
-              score: color.score
-            })) || []
+            text: visionResponse.textAnnotations?.[0]?.description || ''
           };
 
           imageAnalyses.push(analysis);
-          console.log(`✅ Image ${i + 1} analyzed successfully`);
+          console.log(`✅ Image ${i + 1} analyzed`);
         } catch (error) {
-          console.error(`❌ Error analyzing image ${i + 1}:`, error);
+          console.error(`❌ Image ${i + 1} failed:`, error.message);
           imageAnalyses.push({
             imageIndex: i + 1,
-            error: 'Failed to analyze image',
-            details: error.message
+            error: 'Failed to analyze'
           });
         }
       }
     }
 
-    // Combine business context with product information for comprehensive analysis
-    const comprehensiveAnalysisPrompt = `
-Analyze this craft product with both business context and detailed product information:
-
-BUSINESS CONTEXT:
-${JSON.stringify(session.businessSummary, null, 2)}
-
-PRODUCT VOICE DESCRIPTION:
-"${productTranscript}"
-
-IMAGE ANALYSIS RESULTS:
-${JSON.stringify(imageAnalyses, null, 2)}
-
-Provide a comprehensive JSON response with:
-{
-  "productSummary": {
-    "name": "product name",
-    "category": "product category",
-    "materials": ["material1", "material2"],
-    "techniques": ["technique1", "technique2"],
-    "uniqueFeatures": ["feature1", "feature2"],
-    "qualityLevel": "beginner/intermediate/professional",
-    "timeToMake": "estimated time",
-    "difficulty": "easy/medium/hard"
-  },
-  "visualAnalysis": {
-    "overallAppearance": "description",
-    "colorScheme": ["color1", "color2"],
-    "craftsmanship": "assessment of quality",
-    "marketAppeal": "how appealing to customers",
-    "photographyQuality": "assessment of photos",
-    "improvementSuggestions": ["suggestion1", "suggestion2"]
-  },
-  "marketingInsights": {
-    "targetAudience": "who would buy this",
-    "pricingRange": "suggested price range",
-    "sellingPoints": ["point1", "point2"],
-    "competitiveAdvantage": "what makes it special",
-    "seasonality": "best time to sell"
-  },
-  "digitalMarketingStrategy": {
-    "instagramHashtags": ["#tag1", "#tag2", "#tag3"],
-    "keywordFocus": ["keyword1", "keyword2"],
-    "contentAngles": ["angle1", "angle2"],
-    "platformSuitability": {
-      "instagram": "why good/bad for Instagram",
-      "facebook": "why good/bad for Facebook",
-      "whatsapp": "why good/bad for WhatsApp marketing",
-      "website": "why good/bad for website"
+    // AI Analysis
+    if (!generativeModel) {
+      return res.status(500).json({ error: 'Vertex AI not initialized' });
     }
-  },
-  "recommendations": {
-    "immediate": ["action1", "action2"],
-    "shortTerm": ["action1", "action2"],
-    "longTerm": ["action1", "action2"]
-  }
-}
 
-Be specific and actionable. Use the business context to make personalized recommendations.`;
+    const prompt = `Analyze this product with business context:
 
-    console.log('🤖 Sending to Vertex AI for comprehensive analysis...');
+BUSINESS: ${JSON.stringify(session.businessSummary, null, 2)}
+PRODUCT DESCRIPTION: "${productTranscript}"
+IMAGE ANALYSIS: ${JSON.stringify(imageAnalyses, null, 2)}
 
-    const result = await generativeClient.generateContent({
-      contents: [{ role: 'user', parts: [{ text: comprehensiveAnalysisPrompt }] }],
-      generationConfig: { temperature: 0.4, maxOutputTokens: 4096, topP: 0.8, topK: 40 },
+Provide JSON with: productSummary{name,category,materials[],techniques[],uniqueFeatures[],qualityLevel,timeToMake}, marketingInsights{targetAudience,pricingRange,sellingPoints[],competitiveAdvantage}, recommendations{immediate[],shortTerm[],longTerm[]}`;
+
+    const result = await generativeModel.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.4,
+        maxOutputTokens: 4096,
+      },
     });
 
-    const parts = result.response?.candidates?.[0]?.content?.parts || [];
-    const aiContent = parts.map(p => p.text || '').join('\n');
-    
-    // Extract JSON from AI response
-    const jsonMatch = aiContent.match(/\{[\s\S]*\}/);
-    let productAnalysis;
-    
-    if (jsonMatch) {
-      try {
-        productAnalysis = JSON.parse(jsonMatch[0]);
-      } catch (error) {
-        console.error('Error parsing product analysis JSON:', error);
-        productAnalysis = { error: 'Failed to parse AI response', rawResponse: aiContent };
-      }
-    } else {
-      productAnalysis = { error: 'No JSON found in response', rawResponse: aiContent };
-    }
+    const aiText = result?.response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const productAnalysis = extractJson(aiText) || { rawResponse: aiText };
 
-    // Update session with product analysis
+    // Update session
     session.productTranscript = productTranscript;
     session.imageAnalyses = imageAnalyses;
     session.productAnalysis = productAnalysis;
@@ -208,8 +151,7 @@ Be specific and actionable. Use the business context to make personalized recomm
     session.updatedAt = new Date();
     await session.save();
 
-    console.log('✅ Comprehensive product analysis complete');
-
+    console.log('✅ Product analysis complete');
     res.json({
       success: true,
       sessionId,
@@ -220,71 +162,33 @@ Be specific and actionable. Use the business context to make personalized recomm
     });
 
   } catch (error) {
-    console.error('❌ Error in comprehensive product analysis:', error);
+    console.error('❌ Error in product analysis:', error);
     res.status(500).json({
-      error: 'Failed to analyze product comprehensively',
+      error: 'Failed to analyze product',
       details: error.message
     });
   }
 };
 
-// Existing functions (keeping for backward compatibility)
+// Legacy functions
 exports.processProduct = async (req, res) => {
-  try {
-    console.log('🔄 Processing product with existing method...');
-    // Keep existing implementation for backward compatibility
-    // This can be the fallback method
-    
-    res.json({
-      success: true,
-      message: 'Please use the new comprehensive analysis endpoint',
-      recommendedEndpoint: '/api/products/analyze-comprehensive'
-    });
-  } catch (error) {
-    console.error('❌ Error in process product:', error);
-    res.status(500).json({
-      error: 'Failed to process product',
-      details: error.message
-    });
-  }
+  res.json({ success: true, message: 'Use /api/products/analyze-comprehensive' });
 };
 
 exports.getProduct = async (req, res) => {
   try {
-    const { id } = req.params;
-    
-    // Try to find in BusinessSession first (new flow)
-    let product = await BusinessSession.findById(id);
-    
-    if (!product) {
-      // Fallback to Product model (old flow)
-      product = await Product.findById(id);
-    }
-    
-    if (!product) {
-      return res.status(404).json({ error: 'Product not found' });
-    }
-
-    res.json({
-      success: true,
-      product
-    });
+    const product = await BusinessSession.findById(req.params.id) || await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+    res.json({ success: true, product });
   } catch (error) {
-    console.error('❌ Error getting product:', error);
-    res.status(500).json({
-      error: 'Failed to get product',
-      details: error.message
-    });
+    res.status(500).json({ error: 'Failed to get product', details: error.message });
   }
 };
 
 exports.approveProduct = async (req, res) => {
   try {
-    const { id } = req.params;
     const { approved, feedback } = req.body;
-    
-    // Try to find in BusinessSession first (new flow)
-    let product = await BusinessSession.findById(id);
+    let product = await BusinessSession.findById(req.params.id);
     
     if (product) {
       product.productApproved = approved;
@@ -293,32 +197,12 @@ exports.approveProduct = async (req, res) => {
       product.updatedAt = new Date();
       await product.save();
     } else {
-      // Fallback to Product model (old flow)
-      product = await Product.findByIdAndUpdate(
-        id,
-        { 
-          approved, 
-          feedback, 
-          updatedAt: new Date() 
-        },
-        { new: true }
-      );
+      product = await Product.findByIdAndUpdate(req.params.id, { approved, feedback, updatedAt: new Date() }, { new: true });
     }
     
-    if (!product) {
-      return res.status(404).json({ error: 'Product not found' });
-    }
-
-    res.json({
-      success: true,
-      product,
-      nextStep: approved ? 'generate_recommendations' : 'revise_product'
-    });
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+    res.json({ success: true, product, nextStep: approved ? 'generate_recommendations' : 'revise_product' });
   } catch (error) {
-    console.error('❌ Error approving product:', error);
-    res.status(500).json({
-      error: 'Failed to approve product',
-      details: error.message
-    });
+    res.status(500).json({ error: 'Failed to approve product', details: error.message });
   }
 };
