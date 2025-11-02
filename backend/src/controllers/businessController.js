@@ -9,6 +9,9 @@ const aiplatformClient = new PredictionServiceClient({
   apiEndpoint: 'us-central1-aiplatform.googleapis.com',
 });
 
+const MODEL_NAME = process.env.VERTEX_MODEL || 'gemini-2.5-flash';
+const MODEL_ENDPOINT = `projects/${process.env.GOOGLE_PROJECT_ID}/locations/us-central1/publishers/google/models/${MODEL_NAME}`;
+
 // Step 1: Analyze Business Overview from Voice Recording
 exports.analyzeBusinessOverview = async (req, res) => {
   try {
@@ -65,7 +68,7 @@ Please provide a JSON response with:
 Be conversational and understanding. If information is not clearly mentioned, use 'Not specified' or make reasonable assumptions based on context.`;
 
     const vertexRequest = {
-      endpoint: `projects/${process.env.GOOGLE_PROJECT_ID}/locations/us-central1/publishers/google/models/gemini-1.5-flash-002`,
+      endpoint: MODEL_ENDPOINT,
       instances: [{ content: businessAnalysisPrompt }],
       parameters: {
         temperature: 0.3,
@@ -228,7 +231,7 @@ Provide a JSON response with:
 }`;
 
     const vertexRequest = {
-      endpoint: `projects/${process.env.GOOGLE_PROJECT_ID}/locations/us-central1/publishers/google/models/gemini-1.5-flash-002`,
+      endpoint: MODEL_ENDPOINT,
       instances: [{ content: recommendationsPrompt }],
       parameters: {
         temperature: 0.4,

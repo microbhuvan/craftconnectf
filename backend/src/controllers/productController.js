@@ -12,6 +12,9 @@ const aiplatformClient = new PredictionServiceClient({
   apiEndpoint: 'us-central1-aiplatform.googleapis.com',
 });
 
+const MODEL_NAME = process.env.VERTEX_MODEL || 'gemini-2.5-flash';
+const MODEL_ENDPOINT = `projects/${process.env.GOOGLE_PROJECT_ID}/locations/us-central1/publishers/google/models/${MODEL_NAME}`;
+
 // Step 3: Comprehensive Product Analysis (Voice + Images)
 exports.analyzeComprehensive = async (req, res) => {
   try {
@@ -171,7 +174,7 @@ Be specific and actionable. Use the business context to make personalized recomm
     console.log('🤖 Sending to Vertex AI for comprehensive analysis...');
 
     const vertexRequest = {
-      endpoint: `projects/${process.env.GOOGLE_PROJECT_ID}/locations/us-central1/publishers/google/models/gemini-1.5-flash-002`,
+      endpoint: MODEL_ENDPOINT,
       instances: [{ content: comprehensiveAnalysisPrompt }],
       parameters: {
         temperature: 0.4,
