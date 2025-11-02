@@ -11,7 +11,6 @@ const PAGE_ACCESS_TOKEN =
 const GRAPH_VER = process.env.FB_GRAPH_VERSION || "v24.0";
 
 if (!PAGE_ID || !PAGE_ACCESS_TOKEN) {
-  // Do not crash server; log warning so other routes still work
   console.warn(
     "[facebook] Missing FB_PAGE_ID or FB_PAGE_ACCESS_TOKEN. /api/facebook routes will return 503."
   );
@@ -28,6 +27,7 @@ function normalizeFbError(err) {
     const code = e.code;
     const sub = e.error_subcode;
     const msg = e.message;
+    if (code === 190) return `Token error (190${sub ? "/" + sub : ""}): ${msg}`;
     if (code === 200)
       return "Permission error (200): token must be a PAGE token with pages_manage_posts + pages_read_engagement and you must be Page admin.";
     if (code === 100) {
@@ -53,6 +53,16 @@ async function retry(fn, { retries = 2, delayMs = 500 } = {}) {
     }
   }
   throw lastErr;
+}
+
+async function headOk(url) {
+  try {
+    const r = await axios.head(url, { timeout: 8000 });
+    const ctype = String(r.headers["content-type"] || "");
+    return r.status >= 200 && r.status < 300 && ctype.startsWith("image/");
+  } catch (e) {
+    return false;
+  }
 }
 
 // Health
@@ -132,7 +142,7 @@ router.post("/post-text-from-session", async (req, res) => {
   }
 });
 
-// Post photo(s) using sessionId (posts first image + caption)
+// Post photo(s) using sessionId (posts first image + caption) with URL validation
 router.post("/post-photo-from-session", async (req, res) => {
   try {
     if (!PAGE_ID || !PAGE_ACCESS_TOKEN)
@@ -151,10 +161,22 @@ router.post("/post-photo-from-session", async (req, res) => {
       return res
         .status(400)
         .json({ ok: false, error: "No images available in session" });
+
+    // Validate image URL is public and an image
+    const imageUrl = images[0];
+    const ok = await headOk(imageUrl);
+    if (!ok) {
+      return res.status(400).json({
+        ok: false,
+        error:
+          "Image URL is not publicly accessible or not an image. Ensure Cloudinary upload and session update succeeded.",
+      });
+    }
+
     const caption = buildMessageFromSession(session);
 
     const params = new URLSearchParams();
-    params.append("url", images[0]);
+    params.append("url", imageUrl);
     params.append("caption", caption);
     params.append("access_token", PAGE_ACCESS_TOKEN);
 
