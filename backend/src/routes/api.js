@@ -62,6 +62,20 @@ router.post(
   aiController.generateWhatsAppMessage
 );
 
+// WhatsApp message generation from session data
+router.post(
+  "/whatsapp/generate-from-session",
+  aiController.generateWhatsAppFromSession
+);
+
+// --- FACEBOOK INTEGRATION ---
+const facebookRoutes = require("./facebook");
+router.use("/facebook", facebookRoutes);
+
+// --- SHOPIFY INTEGRATION ---
+const shopifyRoutes = require("./shopify");
+router.use("/shopify", shopifyRoutes);
+
 // --- ADDITIONAL API ENDPOINTS ---
 
 // Image upload and Vision AI analysis
