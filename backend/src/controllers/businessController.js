@@ -1,5 +1,6 @@
 const { SpeechClient } = require('@google-cloud/speech');
-const { VertexAI } = require('@google-cloud/aiplatform').v1beta;
+const aiplatform = require('@google-cloud/aiplatform');
+const { VertexAI } = aiplatform;
 const mongoose = require('mongoose');
 const BusinessSession = require('../models/BusinessSession');
 
