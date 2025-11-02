@@ -4,46 +4,34 @@ const SessionSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: false // Allow guest users
+    required: false
   },
   sessionId: {
     type: String,
     required: true,
     unique: true
   },
-
-  // Current workflow step
   currentStep: {
     type: String,
     enum: ['voice_recording', 'image_upload', 'ai_processing', 'review', 'channels'],
     default: 'voice_recording'
   },
-
-  // Temporary data during workflow
   tempData: {
     transcript: String,
-    analysis: mongoose.Schema.Types.Mixed, // Business analysis from voice
+    analysis: mongoose.Schema.Types.Mixed,
     originalImageUrl: String,
     visionResults: mongoose.Schema.Types.Mixed,
-    currentProductId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Product'
-    }
+    currentProductId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' }
   },
-
-  // Auto-expire sessions after 24 hours (removed duplicate index)
   expiresAt: {
     type: Date,
-    default: Date.now
-    // Removed 'expires' - will use schema-level index instead
+    default: () => new Date(Date.now() + 24 * 60 * 60 * 1000) // set 24h in future
   }
-}, {
-  timestamps: true
-});
+}, { timestamps: true });
 
-// Indexes
+// Indexes (single TTL index only)
 SessionSchema.index({ userId: 1 });
 SessionSchema.index({ sessionId: 1 });
-SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 86400 }); // TTL index for auto-cleanup
+SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // expire at the stored date
 
 module.exports = mongoose.model('Session', SessionSchema);
