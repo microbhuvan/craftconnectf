@@ -1,6 +1,7 @@
 // Import dependencies
 const { SpeechClient } = require("@google-cloud/speech");
 const { VertexAI } = require("@google-cloud/vertexai");
+const axios = require("axios");
 
 // Initialize clients with error handling
 let speechClient = null;
@@ -22,11 +23,11 @@ try {
     location: process.env.GOOGLE_LOCATION || "us-central1",
   });
   
-  // For older versions of @google-cloud/vertexai (v0.1.3)
+  // Use Gemini 2.5 Flash
   generativeAI = vertexAI.preview.getGenerativeModel({
-    model: process.env.VERTEX_MODEL || "gemini-1.5-flash",
+    model: process.env.VERTEX_MODEL || "gemini-2.0-flash-exp",
   });
-  console.log("✅ Vertex AI initialized successfully");
+  console.log("✅ Vertex AI initialized successfully with model:", process.env.VERTEX_MODEL || "gemini-2.0-flash-exp");
 } catch (e) {
   console.error("❌ Failed to initialize Vertex AI:", e.message);
 }
@@ -37,7 +38,7 @@ try {
  * Transcribes audio using Google Speech-to-Text API with multiple format support.
  */
 async function transcribeAudio(audioBuffer) {
-  console.time("transcribeAudio_function"); // Start transcribe function timer
+  console.time("transcribeAudio_function");
   if (!speechClient) {
     throw new Error("Speech client not initialized");
   }
@@ -52,7 +53,7 @@ async function transcribeAudio(audioBuffer) {
   for (const encoding of encodings) {
     try {
       console.log(`Trying encoding: ${encoding}`);
-      console.time(`speechClient_recognize_${encoding}`); // Start recognize timer for each encoding
+      console.time(`speechClient_recognize_${encoding}`);
       
       const audio = {
         content: audioBuffer.toString("base64"),
@@ -75,7 +76,7 @@ async function transcribeAudio(audioBuffer) {
       
       const request = { audio, config };
       const [response] = await speechClient.recognize(request);
-      console.timeEnd(`speechClient_recognize_${encoding}`); // End recognize timer
+      console.timeEnd(`speechClient_recognize_${encoding}`);
       
       if (response.results && response.results.length > 0) {
         const transcription = response.results
@@ -84,12 +85,12 @@ async function transcribeAudio(audioBuffer) {
           
         if (transcription && transcription.trim().length > 0) {
           console.log(`Success with encoding: ${encoding}`);
-          console.timeEnd("transcribeAudio_function"); // End transcribe function timer on success
+          console.timeEnd("transcribeAudio_function");
           return { success: true, text: transcription };
         }
       }
     } catch (err) {
-      console.timeEnd(`speechClient_recognize_${encoding}`); // End recognize timer on error
+      console.timeEnd(`speechClient_recognize_${encoding}`);
       console.log(`Failed with encoding ${encoding}:`, err.message || err);
       lastError = err;
       continue;
@@ -97,7 +98,7 @@ async function transcribeAudio(audioBuffer) {
   }
 
   console.error("All encoding attempts failed");
-  console.timeEnd("transcribeAudio_function"); // End transcribe function timer on failure
+  console.timeEnd("transcribeAudio_function");
   return {
     success: false,
     error: `Speech recognition failed. Last error: ${lastError?.message || "Unknown"}`
@@ -120,7 +121,7 @@ function sanitizeRawText(raw) {
 
   // Remove common leading phrases
   s = s.replace(
-    /^[\s\n\r\t]*(?:here is the json|here's the json|here is the json requested|output:|answer:|here is the output)[:\s-]*/i,
+    /^[\s\n\r\t]*(?:here is the json|here's the json|here is the json requested|output:|answer:|here is the output)[:s-]*/i,
     ""
   );
 
@@ -146,7 +147,7 @@ function repairJson(jsonStr) {
     let attempt = jsonStr
       .replace(/,\s*([}\]])/g, "$1") // Remove trailing commas
       .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2":') // Ensure property names are quoted
-      .replace(/:\s*'([^']*)'/g, ':"$1"'); // Replace single quotes with double quotes
+      .replace(/:s*'([^']*)'/g, ':"$1"'); // Replace single quotes with double quotes
 
     try {
       return JSON.parse(attempt);
@@ -265,12 +266,10 @@ async function analyzeTranscriptWithVertexAI(transcript) {
     }
 
     console.log("Raw text from AI (first 100 chars):", responseText.substring(0, 100));
-    console.log("FULL RAW RESPONSE FROM VERTEX AI:", responseText);
 
     // Sanitize and repair
     const sanitized = sanitizeRawText(responseText);
     console.log("Sanitized text (first 100 chars):", sanitized.substring(0, 100));
-    console.log("FULL SANITIZED TEXT:", sanitized);
     
     let parsed = null;
     
@@ -278,24 +277,17 @@ async function analyzeTranscriptWithVertexAI(transcript) {
       // First attempt: direct JSON parse
       parsed = JSON.parse(sanitized);
       console.log("Successfully parsed JSON directly");
-      console.log("PARSED JSON STRUCTURE:", JSON.stringify(parsed, null, 2));
     } catch (parseError) {
       console.warn("Initial JSON parse failed, attempting repair...");
       console.error("JSON PARSE ERROR:", parseError.message);
-      console.log("FAILED JSON STRING:", sanitized);
       
       try {
         // Second attempt: Try to repair JSON
         const repairedJson = repairJson(sanitized);
-        console.log("Repaired JSON (first 100 chars):", repairedJson.substring(0, 100));
-        console.log("FULL REPAIRED JSON:", repairedJson);
         parsed = JSON.parse(repairedJson);
         console.log("Successfully parsed repaired JSON");
-        console.log("REPAIRED JSON STRUCTURE:", JSON.stringify(parsed, null, 2));
       } catch (repairError) {
         console.error("JSON repair failed:", repairError.message);
-        console.error("REPAIR ERROR DETAILS:", repairError);
-        console.log("REPAIR ATTEMPT FAILED ON:", sanitized);
         throw new Error(`Failed to parse AI response as JSON: ${repairError.message}`);
       }
     }
@@ -316,7 +308,6 @@ async function analyzeTranscriptWithVertexAI(transcript) {
     console.log("VALIDATING JSON STRUCTURE");
     parsed = ensureValidAnalysisFormat(parsed);
     console.log("VALIDATED JSON STRUCTURE:", JSON.stringify(parsed, null, 2));
-    console.log("Returning from analyzeTranscriptWithVertexAI with data:", JSON.stringify(parsed, null, 2)); // Added log
     
     return {
       success: true,
@@ -377,14 +368,23 @@ function ensureValidAnalysisFormat(data) {
   return validatedData;
 }
 
+// Helper function to get session data from internal API
+async function getSession(sessionId) {
+  const baseUrl =
+    process.env.INTERNAL_BASE_URL ||
+    `http://localhost:${process.env.PORT || 8080}`;
+  const r = await axios.get(`${baseUrl}/api/session/${sessionId}`);
+  return r.data.session || r.data; // support both shapes
+}
+
 // --- EXPORTED API HANDLERS ---
 
 exports.analyzeBusinessAudio = async (req, res) => {
   console.log("analyzeBusinessAudio function entered");
-  console.time("analyzeBusinessAudio_total"); // Start total timer
+  console.time("analyzeBusinessAudio_total");
   if (!req.file || !req.file.buffer) {
     console.error("❌ No audio file uploaded or buffer is empty.");
-    console.timeEnd("analyzeBusinessAudio_total"); // End total timer on error
+    console.timeEnd("analyzeBusinessAudio_total");
     return res.status(200).json({
       success: false,
       error: "No audio file uploaded",
@@ -408,14 +408,14 @@ exports.analyzeBusinessAudio = async (req, res) => {
     console.log("Audio file mimetype:", req.file.mimetype);
     
     // Step 1: Transcribe the audio
-    console.time("transcribeAudio_step"); // Start transcribe timer
+    console.time("transcribeAudio_step");
     console.log("Attempting to transcribe audio...");
     const transcriptionResult = await transcribeAudio(req.file.buffer);
-    console.timeEnd("transcribeAudio_step"); // End transcribe timer
+    console.timeEnd("transcribeAudio_step");
     
     if (!transcriptionResult.success) {
       console.error("❌ Audio transcription failed:", transcriptionResult.error);
-      console.timeEnd("analyzeBusinessAudio_total"); // End total timer on error
+      console.timeEnd("analyzeBusinessAudio_total");
       return res.status(200).json({
         success: false,
         error: transcriptionResult.error || "Failed to transcribe audio",
@@ -437,15 +437,15 @@ exports.analyzeBusinessAudio = async (req, res) => {
     console.log("Transcription successful. Transcript (first 100 chars):", transcript.substring(0, 100) + "...");
     
     // Step 2: Analyze the transcript with Vertex AI
-    console.time("analyzeTranscriptWithVertexAI_step"); // Start Vertex AI timer
+    console.time("analyzeTranscriptWithVertexAI_step");
     console.log("Attempting to analyze transcript with Vertex AI...");
     const analysisResult = await analyzeTranscriptWithVertexAI(transcript);
-    console.timeEnd("analyzeTranscriptWithVertexAI_step"); // End Vertex AI timer
+    console.timeEnd("analyzeTranscriptWithVertexAI_step");
     
     // Handle case where analysis failed but we have a fallback analysis
     if (!analysisResult.success && analysisResult.fallbackAnalysis) {
       console.warn("⚠️ Vertex AI analysis failed, using fallback analysis.", analysisResult.error);
-      console.timeEnd("analyzeBusinessAudio_total"); // End total timer on error
+      console.timeEnd("analyzeBusinessAudio_total");
       return res.status(200).json({
         success: true,
         partial: true,
@@ -458,7 +458,7 @@ exports.analyzeBusinessAudio = async (req, res) => {
     // Handle case where analysis failed without fallback
     if (!analysisResult.success) {
       console.error("❌ Vertex AI analysis failed without fallback:", analysisResult.error);
-      console.timeEnd("analyzeBusinessAudio_total"); // End total timer on error
+      console.timeEnd("analyzeBusinessAudio_total");
       return res.status(200).json({
         success: true,
         partial: true,
@@ -478,16 +478,16 @@ exports.analyzeBusinessAudio = async (req, res) => {
     }
 
     console.log("Vertex AI analysis successful.");
-    console.log("Analysis result before sending:", JSON.stringify(analysisResult.data, null, 2)); // Corrected to .data
-    console.timeEnd("analyzeBusinessAudio_total"); // End total timer on success
+    console.log("Analysis result before sending:", JSON.stringify(analysisResult.data, null, 2));
+    console.timeEnd("analyzeBusinessAudio_total");
     return res.status(200).json({
       success: true,
       transcript: transcript,
-      analysis: analysisResult.data, // Corrected to .data
+      analysis: analysisResult.data,
     });
   } catch (error) {
     console.error("❌ Error during business audio analysis:", error);
-    console.timeEnd("analyzeBusinessAudio_total"); // End total timer on catch
+    console.timeEnd("analyzeBusinessAudio_total");
     return res.status(500).json({
       success: false,
       error: "Internal Server Error",
@@ -578,38 +578,105 @@ exports.generateWhatsAppMessage = async (req, res) => {
   }
 };
 
-/**
- * Sanitizes raw text from AI response by removing markdown code blocks and extra whitespace
- */
-function sanitizeRawText(text) {
-  // Remove markdown code blocks if present
-  let sanitized = text.replace(/```json\s*|\s*```/g, '');
-  
-  // Remove any non-JSON text before or after the JSON object
-  const jsonStart = sanitized.indexOf('{');
-  const jsonEnd = sanitized.lastIndexOf('}');
-  
-  if (jsonStart >= 0 && jsonEnd >= 0) {
-    sanitized = sanitized.substring(jsonStart, jsonEnd + 1);
-  }
-  
-  return sanitized.trim();
-}
+// NEW: Generate WhatsApp message from session data
+exports.generateWhatsAppFromSession = async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        error: "sessionId is required"
+      });
+    }
 
-/**
- * Attempts to repair malformed JSON by fixing common issues
- */
-function repairJson(text) {
-  let repaired = text;
-  
-  // Fix missing quotes around property names
-  repaired = repaired.replace(/(\s*)(\w+)(\s*):/g, '$1"$2"$3:');
-  
-  // Fix missing quotes around string values
-  repaired = repaired.replace(/:(\s*)([^{}\[\]"'\s,][^{}\[\]"',]*[^{}\[\]"'\s,])(\s*)(,|}|])/g, ':"$2"$3$4');
-  
-  // Fix trailing commas
-  repaired = repaired.replace(/,(\s*)(}|\])/g, '$1$2');
-  
-  return repaired;
-}
+    // Get session data
+    const session = await getSession(sessionId);
+    
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: "Session not found"
+      });
+    }
+
+    // Extract relevant information from session
+    const businessType = session.businessSummary?.businessName || session.businessSummary?.businessType || "Craft Business";
+    const detectedFocus = session.businessSummary?.detectedFocus || "Handmade products";
+    const productName = session.productAnalysis?.productSummary?.name || "our products";
+    const features = session.productAnalysis?.productSummary?.uniqueFeatures || [];
+    const pricingRange = session.productAnalysis?.marketingInsights?.pricingRange || "Competitive pricing";
+
+    if (!generativeAI) {
+      const fallbackMessage = `👋 Hello there!\n\nThank you for your interest in our ${businessType}! We specialize in ${detectedFocus}.\n\n✨ ${productName} - ${features.slice(0, 2).join(", ")}\n\n💰 ${pricingRange}\n\nPlease let us know what you're looking for and we'll be happy to help! 😊`;
+      
+      return res.status(200).json({ 
+        success: true,
+        partial: true,
+        message: fallbackMessage,
+        error: "Vertex AI not initialized" 
+      });
+    }
+
+    const prompt = `
+      You are an expert WhatsApp Business marketing copywriter. Generate a professional, engaging WhatsApp message for a craft business.
+
+      **Business Information:**
+      - Business Type: ${businessType}
+      - Products/Focus: ${detectedFocus}
+      - Product Name: ${productName}
+      - Key Features: ${features.slice(0, 3).join(", ")}
+      - Pricing: ${pricingRange}
+
+      **Message Requirements:**
+      1. Start with a warm, friendly greeting
+      2. Use appropriate emojis (but don't overdo it)
+      3. Briefly introduce the business and main product
+      4. Highlight 2-3 key features or benefits
+      5. Include pricing information naturally
+      6. End with a clear call-to-action encouraging response
+      7. Keep it conversational and under 200 words
+      8. Make it sound personal, not automated
+
+      Generate the WhatsApp message now:
+    `;
+
+    const result = await generativeAI.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 300,
+      }
+    });
+
+    // Extract message text
+    let message = "";
+    if (result?.response?.candidates?.[0]?.content?.parts?.[0]?.text) {
+      message = result.response.candidates[0].content.parts[0].text;
+    } else if (result?.response?.text) {
+      message = result.response.text;
+    } else {
+      throw new Error("Invalid response format from Vertex AI");
+    }
+
+    return res.status(200).json({ 
+      success: true, 
+      message: message.trim(),
+      sessionId,
+      businessType
+    });
+
+  } catch (error) {
+    console.error("❌ Error generating WhatsApp message from session:", error);
+    
+    // Provide a fallback message
+    const fallbackMessage = "👋 Hello! Thank you for your interest in our handmade products. We'd love to help you find exactly what you're looking for! Please let us know how we can assist you. 😊";
+    
+    return res.status(200).json({ 
+      success: true, 
+      partial: true,
+      message: fallbackMessage,
+      error: error.message || "Failed to generate message"
+    });
+  }
+};
