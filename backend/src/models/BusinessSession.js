@@ -11,7 +11,6 @@ const BusinessSessionSchema = new mongoose.Schema({
     mainChallenges: [String],
     currentStatus: String,
     goals: [String],
-    // Accept boolean-like strings from AI and coerce
     hasOnlinePresence: { type: mongoose.Schema.Types.Mixed },
     targetMarket: String,
     keyStrengths: [String]
@@ -30,6 +29,13 @@ const BusinessSessionSchema = new mongoose.Schema({
     details: String
   }],
   productAnalysis: {
+    marketingInsights: {
+      targetAudience: { type: [String], default: [] },
+      pricingRange: String,
+      sellingPoints: { type: [String], default: [] },
+      competitiveAdvantage: { type: [String], default: [] },
+      seasonality: String
+    },
     productSummary: {
       name: String, category: String, materials: [String], techniques: [String],
       uniqueFeatures: [String], qualityLevel: String, timeToMake: String, difficulty: String
@@ -37,10 +43,6 @@ const BusinessSessionSchema = new mongoose.Schema({
     visualAnalysis: {
       overallAppearance: String, colorScheme: [String], craftsmanship: String,
       marketAppeal: String, photographyQuality: String, improvementSuggestions: [String]
-    },
-    marketingInsights: {
-      targetAudience: String, pricingRange: String, sellingPoints: [String],
-      competitiveAdvantage: String, seasonality: String
     },
     digitalMarketingStrategy: {
       instagramHashtags: [String], keywordFocus: [String], contentAngles: [String],
@@ -82,13 +84,13 @@ const BusinessSessionSchema = new mongoose.Schema({
   timeSpent: { type: Number, default: 0 }
 });
 
-// Indexes for performance and TTL
+// Indexes
 BusinessSessionSchema.index({ createdAt: 1 });
 BusinessSessionSchema.index({ step: 1 });
 BusinessSessionSchema.index({ isActive: 1 });
 BusinessSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
-// Coerce hasOnlinePresence to boolean on save if needed
+// Coercions and computed fields
 BusinessSessionSchema.pre('save', function(next) {
   this.updatedAt = new Date();
   const bs = this.businessSummary || {};
@@ -98,7 +100,6 @@ BusinessSessionSchema.pre('save', function(next) {
     else if (['false','no','n','0'].includes(v)) this.businessSummary.hasOnlinePresence = false;
     else this.businessSummary.hasOnlinePresence = false;
   }
-  // Update completion
   const weights = { 'business_overview_complete':25,'ready_for_product_analysis':35,'product_analysis_complete':70,'ready_for_recommendations':85,'complete':100,'product_needs_revision':60 };
   this.completionRate = weights[this.step] || 0;
   next();
