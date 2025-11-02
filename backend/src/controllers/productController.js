@@ -1,6 +1,6 @@
 const { SpeechClient } = require('@google-cloud/speech');
 const aiplatform = require('@google-cloud/aiplatform');
-const { VertexAI } = aiplatform;
+const { helpers } = aiplatform;
 const { ImageAnnotatorClient } = require('@google-cloud/vision');
 const mongoose = require('mongoose');
 const BusinessSession = require('../models/BusinessSession');
@@ -9,12 +9,15 @@ const Product = require('../models/Product');
 // Initialize Google Cloud clients
 const speechClient = new SpeechClient();
 const visionClient = new ImageAnnotatorClient();
-const vertex = new VertexAI({
-  project: process.env.GOOGLE_PROJECT_ID,
-  location: process.env.GOOGLE_LOCATION || 'us-central1',
-});
 
-const MODEL_NAME = process.env.VERTEX_MODEL || 'gemini-2.5-flash';
+// Build the generative model client via helpers (compatible across versions)
+const clientOptions = {
+  apiEndpoint: `${process.env.GOOGLE_LOCATION || 'us-central1'}-aiplatform.googleapis.com`,
+};
+const publisherModel = {
+  name: `projects/${process.env.GOOGLE_PROJECT_ID}/locations/${process.env.GOOGLE_LOCATION || 'us-central1'}/publishers/google/models/${process.env.VERTEX_MODEL || 'gemini-2.5-flash'}`,
+};
+const generativeClient = new helpers.GenerativeModel(publisherModel, clientOptions);
 
 // Step 3: Comprehensive Product Analysis (Voice + Images)
 exports.analyzeComprehensive = async (req, res) => {
@@ -174,13 +177,12 @@ Be specific and actionable. Use the business context to make personalized recomm
 
     console.log('🤖 Sending to Vertex AI for comprehensive analysis...');
 
-    const model = vertex.getGenerativeModel({ model: MODEL_NAME });
-    const [genResp] = await model.generateContent({
+    const result = await generativeClient.generateContent({
       contents: [{ role: 'user', parts: [{ text: comprehensiveAnalysisPrompt }] }],
       generationConfig: { temperature: 0.4, maxOutputTokens: 4096, topP: 0.8, topK: 40 },
     });
 
-    const parts = genResp.candidates?.[0]?.content?.parts || [];
+    const parts = result.response?.candidates?.[0]?.content?.parts || [];
     const aiContent = parts.map(p => p.text || '').join('\n');
     
     // Extract JSON from AI response
