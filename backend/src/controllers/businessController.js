@@ -1,16 +1,16 @@
 const { SpeechClient } = require('@google-cloud/speech');
-const { PredictionServiceClient } = require('@google-cloud/aiplatform');
+const { VertexAI } = require('@google-cloud/aiplatform').v1beta;
 const mongoose = require('mongoose');
 const BusinessSession = require('../models/BusinessSession');
 
 // Initialize Google Cloud clients
 const speechClient = new SpeechClient();
-const aiplatformClient = new PredictionServiceClient({
-  apiEndpoint: 'us-central1-aiplatform.googleapis.com',
+const vertex = new VertexAI({
+  project: process.env.GOOGLE_PROJECT_ID,
+  location: process.env.GOOGLE_LOCATION || 'us-central1',
 });
 
 const MODEL_NAME = process.env.VERTEX_MODEL || 'gemini-2.5-flash';
-const MODEL_ENDPOINT = `projects/${process.env.GOOGLE_PROJECT_ID}/locations/us-central1/publishers/google/models/${MODEL_NAME}`;
 
 // Step 1: Analyze Business Overview from Voice Recording
 exports.analyzeBusinessOverview = async (req, res) => {
@@ -45,7 +45,7 @@ exports.analyzeBusinessOverview = async (req, res) => {
       return res.status(400).json({ error: 'Could not transcribe audio' });
     }
 
-    // Analyze business overview using Vertex AI
+    // Analyze business overview using Vertex AI generative API
     const businessAnalysisPrompt = `
 Analyze this craft business description and provide a structured summary:
 
@@ -67,20 +67,15 @@ Please provide a JSON response with:
 
 Be conversational and understanding. If information is not clearly mentioned, use 'Not specified' or make reasonable assumptions based on context.`;
 
-    const vertexRequest = {
-      endpoint: MODEL_ENDPOINT,
-      instances: [{ content: businessAnalysisPrompt }],
-      parameters: {
-        temperature: 0.3,
-        maxOutputTokens: 2048,
-        topP: 0.8,
-        topK: 40,
-      },
-    };
+    const model = vertex.getGenerativeModel({ model: MODEL_NAME });
+    const [genResp] = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: businessAnalysisPrompt }] }],
+      generationConfig: { temperature: 0.3, maxOutputTokens: 2048, topP: 0.8, topK: 40 },
+    });
 
-    const [aiResponse] = await aiplatformClient.predict(vertexRequest);
-    const aiContent = aiResponse.predictions[0]?.content || '';
-    
+    const parts = genResp.candidates?.[0]?.content?.parts || [];
+    const aiContent = parts.map(p => p.text || '').join('\n');
+
     // Extract JSON from AI response
     const jsonMatch = aiContent.match(/\{[\s\S]*\}/);
     let businessSummary;
@@ -192,11 +187,6 @@ exports.generateRecommendations = async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    const combinedContext = {
-      businessSummary: session.businessSummary,
-      productAnalysis: session.productAnalysis
-    };
-
     const recommendationsPrompt = `
 Based on this comprehensive business analysis, provide detailed digital marketing recommendations:
 
@@ -230,20 +220,15 @@ Provide a JSON response with:
   "nextSteps": ["step1", "step2", "step3"]
 }`;
 
-    const vertexRequest = {
-      endpoint: MODEL_ENDPOINT,
-      instances: [{ content: recommendationsPrompt }],
-      parameters: {
-        temperature: 0.4,
-        maxOutputTokens: 3072,
-        topP: 0.8,
-        topK: 40,
-      },
-    };
+    const model = vertex.getGenerativeModel({ model: MODEL_NAME });
+    const [genResp] = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: recommendationsPrompt }] }],
+      generationConfig: { temperature: 0.4, maxOutputTokens: 3072, topP: 0.8, topK: 40 },
+    });
 
-    const [aiResponse] = await aiplatformClient.predict(vertexRequest);
-    const aiContent = aiResponse.predictions[0]?.content || '';
-    
+    const parts = genResp.candidates?.[0]?.content?.parts || [];
+    const aiContent = parts.map(p => p.text || '').join('\n');
+
     // Extract JSON from AI response
     const jsonMatch = aiContent.match(/\{[\s\S]*\}/);
     let recommendations;
