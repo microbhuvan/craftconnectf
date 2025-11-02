@@ -23,3 +23,7 @@ yarn-error.log*
 # Other
 .DS_Store
 service-account-key.json
+
+# In backend/.gitignore (or root .gitignore)
+config/service-account-key.json
+

@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require("express");
 const multer = require("multer");
 const aiController = require("../controllers/aiController");
@@ -32,8 +34,8 @@ router.post(
 router.post(
   "/products/analyze-comprehensive",
   upload.fields([
-    { name: 'audio', maxCount: 1 },
-    { name: 'images', maxCount: 10 }
+    { name: "audio", maxCount: 1 },
+    { name: "images", maxCount: 10 },
   ]),
   productController.analyzeComprehensive
 );
@@ -70,31 +72,16 @@ router.post(
 );
 
 // AI processing pipeline (transcript + image -> product summary + enhancement)
-router.post(
-  "/ai/process",
-  productController.processProduct
-);
+router.post("/ai/process", productController.processProduct);
 
 // Product management
-router.get(
-  "/products/:id",
-  productController.getProduct
-);
+router.get("/products/:id", productController.getProduct);
 
-router.post(
-  "/products/:id/approve",
-  productController.approveProduct
-);
+router.post("/products/:id/approve", productController.approveProduct);
 
 // Session management for multi-step flow
-router.get(
-  "/session/:sessionId",
-  businessController.getSession
-);
+router.get("/session/:sessionId", businessController.getSession);
 
-router.post(
-  "/session/:sessionId/update",
-  businessController.updateSession
-);
+router.post("/session/:sessionId/update", businessController.updateSession);
 
 module.exports = router;

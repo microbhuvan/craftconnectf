@@ -1,10 +1,12 @@
+require("dotenv").config();
+
 const express = require("express");
 const router = express.Router();
 const fetch = require("node-fetch");
 
 // Read from environment
 const STORE = process.env.SHOPIFY_STORE_DOMAIN; // e.g. craft-connect-demo1.myshopify.com
-const TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;  // Admin API access token (shpat_...)
+const TOKEN = process.env.SHOPIFY_ADMIN_TOKEN; // Admin API access token (shpat_...)
 const API_VER = process.env.SHOPIFY_API_VERSION || "2025-10";
 const LOC_ID = process.env.LOCATION_ID; // Optional but recommended for inventory
 
@@ -38,7 +40,12 @@ async function shopifyFetch(path, init = {}) {
 
 // Health for Shopify integration
 router.get("/health", async (req, res) => {
-  return res.json({ ok: true, store: STORE, version: API_VER, location: LOC_ID || null });
+  return res.json({
+    ok: true,
+    store: STORE,
+    version: API_VER,
+    location: LOC_ID || null,
+  });
 });
 
 // List products (for quick verification)
@@ -47,22 +54,32 @@ router.get("/products", async (req, res) => {
     const data = await shopifyFetch(`/products.json`);
     res.json(data);
   } catch (e) {
-    res.status(e.status || 500).json({ error: e.message, details: e.body || null });
+    res
+      .status(e.status || 500)
+      .json({ error: e.message, details: e.body || null });
   }
 });
 
 // Helper: build product payload from session object
 function buildProductFromSession(session, artisanId) {
-  const name = session?.productAnalysis?.productSummary?.name
-    || session?.businessSummary?.businessName
-    || "Craft Product";
+  const name =
+    session?.productAnalysis?.productSummary?.name ||
+    session?.businessSummary?.businessName ||
+    "Craft Product";
 
   // Generate a simple description HTML from available fields
   const summary = session?.productAnalysis?.productSummary || {};
-  const insights = session?.marketingInsights || session?.productAnalysis?.marketingInsights || {};
+  const insights =
+    session?.marketingInsights ||
+    session?.productAnalysis?.marketingInsights ||
+    {};
 
-  const materials = Array.isArray(summary.materials) ? summary.materials.join(", ") : (summary.materials || "");
-  const features = Array.isArray(summary.uniqueFeatures) ? summary.uniqueFeatures.join(", ") : (summary.uniqueFeatures || "");
+  const materials = Array.isArray(summary.materials)
+    ? summary.materials.join(", ")
+    : summary.materials || "";
+  const features = Array.isArray(summary.uniqueFeatures)
+    ? summary.uniqueFeatures.join(", ")
+    : summary.uniqueFeatures || "";
 
   const descHtml = `
     <div>
@@ -70,8 +87,16 @@ function buildProductFromSession(session, artisanId) {
       <ul>
         ${materials ? `<li><strong>Materials:</strong> ${materials}</li>` : ""}
         ${features ? `<li><strong>Features:</strong> ${features}</li>` : ""}
-        ${summary.timeToMake ? `<li><strong>Time to make:</strong> ${summary.timeToMake}</li>` : ""}
-        ${summary.qualityLevel ? `<li><strong>Quality:</strong> ${summary.qualityLevel}</li>` : ""}
+        ${
+          summary.timeToMake
+            ? `<li><strong>Time to make:</strong> ${summary.timeToMake}</li>`
+            : ""
+        }
+        ${
+          summary.qualityLevel
+            ? `<li><strong>Quality:</strong> ${summary.qualityLevel}</li>`
+            : ""
+        }
       </ul>
     </div>
   `;
@@ -85,9 +110,11 @@ function buildProductFromSession(session, artisanId) {
   if (!price) price = 299; // sensible default
 
   // Image URLs: expect backend to have stored URLs already (e.g., Cloudinary)
-  const imageUrls = Array.isArray(session?.imageUrls) ? session.imageUrls
-                   : Array.isArray(session?.productImages) ? session.productImages
-                   : [];
+  const imageUrls = Array.isArray(session?.imageUrls)
+    ? session.imageUrls
+    : Array.isArray(session?.productImages)
+    ? session.productImages
+    : [];
 
   return {
     title: name,
@@ -110,17 +137,23 @@ router.post("/publish-from-session", async (req, res) => {
 
     // Either read directly from DB model or call existing session API
     // Prefer calling internal route to avoid model coupling
-    const baseUrl = process.env.INTERNAL_BASE_URL || `http://localhost:${process.env.PORT || 8080}`;
+    const baseUrl =
+      process.env.INTERNAL_BASE_URL ||
+      `http://localhost:${process.env.PORT || 8080}`;
     const sessionRes = await fetch(`${baseUrl}/api/session/${sessionId}`);
     if (!sessionRes.ok) {
       const txt = await sessionRes.text();
-      return res.status(502).json({ error: "Failed to fetch session", details: txt });
+      return res
+        .status(502)
+        .json({ error: "Failed to fetch session", details: txt });
     }
     const sessionJson = await sessionRes.json();
     const session = sessionJson.session || sessionJson; // support both shapes
 
     // Build product payload from session
-    const productPayload = { product: buildProductFromSession(session, artisanId) };
+    const productPayload = {
+      product: buildProductFromSession(session, artisanId),
+    };
 
     // Create product in Shopify
     const createResp = await shopifyFetch(`/products.json`, {
@@ -139,19 +172,34 @@ router.post("/publish-from-session", async (req, res) => {
     if (LOC_ID && variantId && inventoryItemId) {
       await shopifyFetch(`/variants/${variantId}.json`, {
         method: "PUT",
-        body: JSON.stringify({ variant: { id: variantId, inventory_management: "shopify" } }),
+        body: JSON.stringify({
+          variant: { id: variantId, inventory_management: "shopify" },
+        }),
       });
 
-      const available = Number.isFinite(Number(quantity)) ? Number(quantity) : 10;
+      const available = Number.isFinite(Number(quantity))
+        ? Number(quantity)
+        : 10;
       inventory = await shopifyFetch(`/inventory_levels/set.json`, {
         method: "POST",
-        body: JSON.stringify({ location_id: Number(LOC_ID), inventory_item_id: inventoryItemId, available }),
+        body: JSON.stringify({
+          location_id: Number(LOC_ID),
+          inventory_item_id: inventoryItemId,
+          available,
+        }),
       });
     }
 
-    return res.json({ ok: true, product, url: productUrl, autoInventory: LOC_ID ? { location_id: LOC_ID, result: inventory } : null });
+    return res.json({
+      ok: true,
+      product,
+      url: productUrl,
+      autoInventory: LOC_ID ? { location_id: LOC_ID, result: inventory } : null,
+    });
   } catch (e) {
-    return res.status(e.status || 500).json({ error: e.message, details: e.body || null });
+    return res
+      .status(e.status || 500)
+      .json({ error: e.message, details: e.body || null });
   }
 });
 
