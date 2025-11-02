@@ -60,14 +60,12 @@ router.get("/products", async (req, res) => {
   }
 });
 
-// Helper: build product payload from session object
 function buildProductFromSession(session, artisanId) {
   const name =
     session?.productAnalysis?.productSummary?.name ||
     session?.businessSummary?.businessName ||
     "Craft Product";
 
-  // Generate a simple description HTML from available fields
   const summary = session?.productAnalysis?.productSummary || {};
   const insights =
     session?.marketingInsights ||
@@ -101,15 +99,13 @@ function buildProductFromSession(session, artisanId) {
     </div>
   `;
 
-  // Price: prefer numeric field; fallback try to parse from pricingRange like "₹500-700"
   let price = session?.product?.price || session?.productAnalysis?.price;
   if (!price && typeof insights.pricingRange === "string") {
     const match = insights.pricingRange.match(/([0-9]+(?:\.[0-9]+)?)/);
     if (match) price = match[1];
   }
-  if (!price) price = 299; // sensible default
+  if (!price) price = 299;
 
-  // Image URLs: expect backend to have stored URLs already (e.g., Cloudinary)
   const imageUrls = Array.isArray(session?.imageUrls)
     ? session.imageUrls
     : Array.isArray(session?.productImages)
@@ -126,8 +122,7 @@ function buildProductFromSession(session, artisanId) {
   };
 }
 
-// Publish from session id: pulls server-side data only
-// Body: { sessionId: string, artisanId?: string, quantity?: number }
+// Publish from session id with image attach fallback
 router.post("/publish-from-session", async (req, res) => {
   try {
     const { sessionId, artisanId, quantity } = req.body || {};
@@ -135,8 +130,6 @@ router.post("/publish-from-session", async (req, res) => {
       return res.status(400).json({ error: "sessionId is required" });
     }
 
-    // Either read directly from DB model or call existing session API
-    // Prefer calling internal route to avoid model coupling
     const baseUrl =
       process.env.INTERNAL_BASE_URL ||
       `http://localhost:${process.env.PORT || 8080}`;
@@ -148,26 +141,38 @@ router.post("/publish-from-session", async (req, res) => {
         .json({ error: "Failed to fetch session", details: txt });
     }
     const sessionJson = await sessionRes.json();
-    const session = sessionJson.session || sessionJson; // support both shapes
+    const session = sessionJson.session || sessionJson;
 
-    // Build product payload from session
     const productPayload = {
       product: buildProductFromSession(session, artisanId),
     };
 
-    // Create product in Shopify
     const createResp = await shopifyFetch(`/products.json`, {
       method: "POST",
       body: JSON.stringify(productPayload),
     });
 
     const { product } = createResp;
+
+    // If images didn't attach, try to attach after creation
+    let attachAttempt = null;
+    if ((!product.images || product.images.length === 0) && productPayload.product.images?.length) {
+      const images = productPayload.product.images;
+      try {
+        attachAttempt = await shopifyFetch(`/products/${product.id}.json`, {
+          method: "PUT",
+          body: JSON.stringify({ product: { id: product.id, images } }),
+        });
+      } catch (e) {
+        // swallow attach failure, will still return product url
+      }
+    }
+
     const variant = product?.variants?.[0];
     const variantId = variant?.id;
     const inventoryItemId = variant?.inventory_item_id;
     const productUrl = `https://${STORE}/products/${product.handle}`;
 
-    // Auto-inventory if location present
     let inventory = null;
     if (LOC_ID && variantId && inventoryItemId) {
       await shopifyFetch(`/variants/${variantId}.json`, {
@@ -194,6 +199,7 @@ router.post("/publish-from-session", async (req, res) => {
       ok: true,
       product,
       url: productUrl,
+      imageAttachRetry: attachAttempt ? true : false,
       autoInventory: LOC_ID ? { location_id: LOC_ID, result: inventory } : null,
     });
   } catch (e) {
