@@ -3,9 +3,7 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-const path = require("path");
 
-// Initialize app
 const app = express();
 
 // Core middleware
@@ -18,7 +16,7 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Log basic env sanity (avoid printing secrets)
+// Env sanity (no secrets)
 console.log("ENV check:", {
   NODE_ENV: process.env.NODE_ENV || "development",
   PORT: process.env.PORT || 8080,
@@ -33,11 +31,11 @@ console.log("ENV check:", {
 // Health
 app.get("/", (_req, res) => res.status(200).send("Backend is running!"));
 
-// Mount API routes
+// Base API
 const apiRoutes = require("./src/routes/api");
 app.use("/api", apiRoutes);
 
-// Mount Shopify routes only if configured (prevents startup crash)
+// Shopify (optional mount)
 try {
   const shopifyConfigured =
     process.env.SHOPIFY_STORE_DOMAIN && process.env.SHOPIFY_ADMIN_TOKEN;
@@ -55,7 +53,7 @@ try {
   console.error("Failed to mount Shopify routes:", e.message);
 }
 
-// Mount Facebook routes only if configured
+// Facebook (optional mount)
 try {
   const fbConfigured =
     process.env.FB_PAGE_ID && process.env.FB_PAGE_ACCESS_TOKEN;
@@ -79,7 +77,6 @@ app.use((err, _req, res, _next) => {
   res.status(err.status || 500).json({ error: err.message || "Server error" });
 });
 
-// Start server
 const PORT = Number(process.env.PORT) || 8080;
 app.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);

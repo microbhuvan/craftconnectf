@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Mic, MicOff, Play, Square, Upload, X, Image as ImageIcon, Loader2, ArrowRight, ArrowLeft } from 'lucide-react';
+import React, { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { Mic, MicOff, Play, Square, Upload, X, Image as ImageIcon, Loader2, ArrowRight, ArrowLeft } from "lucide-react";
 
 const ProductAnalysisPage = () => {
   const navigate = useNavigate();
@@ -10,7 +10,7 @@ const ProductAnalysisPage = () => {
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [uploadedImages, setUploadedImages] = useState([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   
   const mediaRecorderRef = useRef(null);
@@ -184,7 +184,7 @@ const ProductAnalysisPage = () => {
         };
         
         sessionStorage.setItem('craftConnectSession', JSON.stringify(updatedSession));
-        navigate('/final-recommendations');
+        navigate('/insights');
       } else {
         throw new Error(data.error || 'Analysis failed');
       }
@@ -313,7 +313,7 @@ const ProductAnalysisPage = () => {
           </div>
 
           {/* Image Upload Section */}
-          <div className="bg-white rounded-2xl shadow-xl p-6">
+          <div className={`bg-white rounded-2xl shadow-xl p-6 ${dragActive ? 'ring-2 ring-blue-400' : ''}`}>
             <h2 className="text-2xl font-semibold text-gray-900 mb-6 text-center">
               📸 Product Photos
             </h2>

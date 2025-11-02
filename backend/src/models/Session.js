@@ -31,11 +31,11 @@ const SessionSchema = new mongoose.Schema({
     }
   },
 
-  // Auto-expire sessions after 24 hours
+  // Auto-expire sessions after 24 hours (removed duplicate index)
   expiresAt: {
     type: Date,
-    default: Date.now,
-    expires: 86400 // 24 hours in seconds
+    default: Date.now
+    // Removed 'expires' - will use schema-level index instead
   }
 }, {
   timestamps: true
@@ -44,6 +44,6 @@ const SessionSchema = new mongoose.Schema({
 // Indexes
 SessionSchema.index({ userId: 1 });
 SessionSchema.index({ sessionId: 1 });
-SessionSchema.index({ expiresAt: 1 });
+SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 86400 }); // TTL index for auto-cleanup
 
 module.exports = mongoose.model('Session', SessionSchema);
