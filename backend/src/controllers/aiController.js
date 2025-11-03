@@ -25,9 +25,9 @@ try {
   
   // Use Gemini 2.5 Flash
   generativeAI = vertexAI.preview.getGenerativeModel({
-    model: process.env.VERTEX_MODEL || "gemini-2.0-flash-exp",
+    model: process.env.VERTEX_MODEL || "gemini-2.5-flash",
   });
-  console.log("✅ Vertex AI initialized successfully with model:", process.env.VERTEX_MODEL || "gemini-2.0-flash-exp");
+  console.log("✅ Vertex AI initialized successfully with model:", process.env.VERTEX_MODEL || "gemini-2.5-flash");
 } catch (e) {
   console.error("❌ Failed to initialize Vertex AI:", e.message);
 }
