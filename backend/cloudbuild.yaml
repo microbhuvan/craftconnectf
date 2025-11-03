@@ -1,0 +1,52 @@
+# Cloud Run Buildpacks: fix npm ci errors
+# This Cloud Build config builds and deploys the backend service from the backend directory
+# It runs `npm install` to update the lockfile automatically when dependencies change.
+
+steps:
+  # Install dependencies with npm install (not ci) to keep lockfile in sync
+  - name: 'gcr.io/cloud-builders/npm'
+    dir: 'backend'
+    args: ['install', '--no-fund', '--no-audit']
+
+  # Run a minimal production build step (optional)
+  - name: 'gcr.io/cloud-builders/npm'
+    dir: 'backend'
+    args: ['prune', '--omit=dev']
+
+  # Build container image from backend directory
+  - name: 'gcr.io/cloud-builders/docker'
+    dir: 'backend'
+    args: ['build', '-t', '$LOCATION-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/craftconnectf:latest', '.']
+
+  # Push image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$LOCATION-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/craftconnectf:latest']
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'craftconnectf'
+      - '--image'
+      - '$LOCATION-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/craftconnectf:latest'
+      - '--region'
+      - '$LOCATION'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+      - '--cpu'
+      - '1'
+      - '--memory'
+      - '1Gi'
+      - '--timeout'
+      - '300s'
+
+substitutions:
+  _SERVICE: 'craftconnectf'
+
+images:
+  - '$LOCATION-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/craftconnectf:latest'
